@@ -123,12 +123,15 @@ class PWMDriver:
         self.pwm_freq = 100
         self.servo_ids = [0, 1, 2, 3]
 
+        logging.info("Initializing the PWMdriver. ")
         self.pwm = Adafruit_PCA9685.PCA9685()
         self.pwm.set_pwm_freq(self.pwm_freq)
 
         second_us = 1000000
         period_length_us = second_us // self.pwm_freq
         self.time_per_tick_us = period_length_us // (2 ** 10)
+
+        self.arm_escs()
 
 
     def write_servos(self, vals):
@@ -143,7 +146,69 @@ class PWMDriver:
             self.pwm.set_pwm(id, 0, length)
 
 
+    def arm_escs(self):
+        logging.info("Arming escs. ")
 
-class Controler:
+        for id in self.servo_ids:
+            length = (2000) // self.time_per_tick_us
+            self.pwm.set_pwm(id, 0, length)
+
+        time.sleep(2)
+
+        for id in self.servo_ids:
+            length = (1000) // self.time_per_tick_us
+            self.pwm.set_pwm(id, 0, length)
+
+        time.sleep(2)
+
+
+
+class Controller:
     def __init__(self):
-        pass
+        logging.info("Initializing the Controller. ")
+        self.AHRS = AHRS()
+        self.PWMDriver = PWMDriver()
+
+        self.p_roll = 0.1
+        self.p_pitch = 0.1
+        self.p_yaw = 0.1
+
+        self.d_roll = 0.01
+        self.d_pitch = 0.01
+        self.d_yaw = 0.01
+
+
+    def loop_control(self):
+
+        # Read target control inputs
+        t_roll, t_pitch, t_yaw = self.read_control_inputs()
+
+        # Update sensor data
+        roll, pitch, yaw, quat, timestamp = self.AHRS.update()
+
+        # Target errors
+        e_roll = t_roll - roll
+        e_pitch = t_pitch - pitch
+        e_yaw = t_yaw - yaw
+
+        # Desired correction action
+        roll_act = e_roll * self.p_roll
+        roll_pitch = e_pitch * self.p_pitch
+        roll_yaw = e_yaw* self.p_yaw
+
+        # Translate desired correction actions to servo commands
+        m_1 = 0
+        m_2 = 0
+        m_3 = 0
+        m_4 = 0
+
+        # Write control to servos
+        self.PWMDriver.write_servos([m_1, m_2, m_3, m_3])
+
+
+    def read_control_inputs(self):
+        return 0,0,0
+
+if __name__ == "__main__":
+    controller = Controller()
+    controller.loop_control()

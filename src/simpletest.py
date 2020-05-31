@@ -8,7 +8,6 @@ import time
 # Import the PCA9685 module.
 import Adafruit_PCA9685
 
-
 # Uncomment to enable debug output.
 #import logging
 #logging.basicConfig(level=logging.DEBUG)
