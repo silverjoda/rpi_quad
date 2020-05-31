@@ -22,6 +22,7 @@ class AHRS:
     GYRO_SENSITIVITY = 131.0
     ACC_SENSITIVITY = 16384.0
 
+
     def __init__(self):
         logging.info("Initializing the MPU6050. ")
 
@@ -100,6 +101,7 @@ class AHRS:
 
         self.timestamp = t
 
+        return self.roll, self.pitch, self.yaw, self.quat, self.timestamp
 
 
     def e2q(self, roll, pitch, yaw):
@@ -115,6 +117,33 @@ class AHRS:
         return [qx, qy, qz, qw]
 
 
+
 class PWMDriver:
+    def __init__(self):
+        self.pwm_freq = 100
+        self.servo_ids = [0, 1, 2, 3]
+
+        self.pwm = Adafruit_PCA9685.PCA9685()
+        self.pwm.set_pwm_freq(self.pwm_freq)
+
+        second_us = 1000000
+        period_length_us = second_us // self.pwm_freq
+        self.time_per_tick_us = period_length_us // (2 ** 10)
+
+
+    def write_servos(self, vals):
+        '''
+
+        :param vals: Throttle commmands [0,1] corresponding to min and max values
+        :return: None
+        '''
+
+        for id in self.servo_ids:
+            length = (vals[id] * 1000 + 1000) // self.time_per_tick_us
+            self.pwm.set_pwm(id, 0, length)
+
+
+
+class Controler:
     def __init__(self):
         pass
