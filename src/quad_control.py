@@ -90,9 +90,12 @@ class AHRS:
         t = time.time()
         dt = self.timestamp - t
 
-        self.roll = self.gyro_integration_coeff * (self.roll + self.gyro_x * dt) + self.acc_integration_coeff * 0
-        self.pitch = self.gyro_integration_coeff * (self.pitch + self.gyro_y * dt) + self.acc_integration_coeff * 0
-        self.yaw = self.gyro_integration_coeff * (self.yaw + self.gyro_z * dt) + self.acc_integration_coeff * 0
+        acc_x_dir = np.arctan2(self.acc_x, np.sqrt(self.acc_y ** 2 + self.acc_z))
+        acc_y_dir = np.arctan2(self.acc_y, np.sqrt(self.acc_x ** 2 + self.acc_z))
+
+        self.roll = self.gyro_integration_coeff * (self.roll + self.gyro_x * dt) + self.acc_integration_coeff * acc_x_dir
+        self.pitch = self.gyro_integration_coeff * (self.pitch + self.gyro_y * dt) + self.acc_integration_coeff * acc_y_dir
+        self.yaw = self.yaw + self.gyro_z * dt
         self.quat = self.e2q(self.roll, self.pitch, self.yaw)
 
         self.timestamp = t
