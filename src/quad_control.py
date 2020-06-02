@@ -6,7 +6,7 @@ import numpy as np
 import rospy
 import std_msgs, nav_msgs
 from geometry_msgs.msg import Pose, PoseStamped, Twist
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, Joy
 from nav_msgs.msg import Odometry, Path
 import tf2_ros
 import threading
@@ -175,6 +175,7 @@ class Controller:
         logging.info("Initializing the Controller. ")
         self.AHRS = AHRS()
         self.PWMDriver = PWMDriver()
+        self.ROSInterface = ROSInterface()
 
         self.p_roll = 0.1
         self.p_pitch = 0.1
@@ -210,18 +211,33 @@ class Controller:
         m_4 = 0
 
         # Write control to servos
-        self.PWMDriver.write_servos([m_1, m_2, m_3, m_3])
+        self.PWMDriver.write_servos([m_1, m_2, m_3, m_4])
 
 
     def read_control_inputs(self):
-        return 0,0,0
+        joy_message = self.ROSInterface.joy_input
+        if joy_message is None:
+            return 0,0,0
+        else:
+            t_roll = joy_message.axes[0]
+            t_pitch = joy_message.axes[1]
+            t_yaw = joy_message.axes[2]
+            return t_roll, t_pitch, t_yaw
 
 
 
 class ROSInterface:
     def __init__(self):
-        self.telemetry_pub = rospy.Publisher('quad_IMU', std_msgs.msg.String, queue_size=10)
+        self.quad_pose_pub = rospy.Publisher('quad_pose', PoseStamped, queue_size=10)
+        rospy.Subscriber("quad_teleop", Joy, self._ros_quad_teleop_callback, queue_size=10)
 
+        self.quad_teleop_lock = threading.Lock()
+        self.joy_input = None
+
+
+    def _ros_quad_teleop_callback(self, data):
+        with self.quad_teleop_lock:
+            self.joy_input = data
 
 
 if __name__ == "__main__":
