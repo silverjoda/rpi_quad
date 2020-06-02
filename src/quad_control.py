@@ -3,6 +3,13 @@ import smbus
 import time
 import logging
 import numpy as np
+import rospy
+import std_msgs, nav_msgs
+from geometry_msgs.msg import Pose, PoseStamped, Twist
+from sensor_msgs.msg import Imu
+from nav_msgs.msg import Odometry, Path
+import tf2_ros
+import threading
 
 
 class AHRS:
@@ -208,6 +215,14 @@ class Controller:
 
     def read_control_inputs(self):
         return 0,0,0
+
+
+
+class ROSInterface:
+    def __init__(self):
+        self.telemetry_pub = rospy.Publisher('quad_IMU', std_msgs.msg.String, queue_size=10)
+
+
 
 if __name__ == "__main__":
     controller = Controller()
