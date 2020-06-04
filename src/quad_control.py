@@ -241,6 +241,8 @@ class Controller:
         m_3 = throttle + roll_act + pitch_act + yaw_act
         m_4 = throttle - roll_act + pitch_act - yaw_act
 
+        # TODO: Normalize control inputs, states and outputs to [-1,1] or other appropriate value
+
         # Write control to servos
         self.PWMDriver.write_servos([m_1, m_2, m_3, m_4])
 
@@ -282,6 +284,7 @@ class ROSInterface:
 
     def publish_telemetry(self):
         pass
+
 
 
 if __name__ == "__main__":
