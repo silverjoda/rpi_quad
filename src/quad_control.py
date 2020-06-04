@@ -126,7 +126,12 @@ class AHRS:
 
 
 class PWMDriver:
-    def __init__(self):
+    def __init__(self, motors_on):
+        self.motors_on = motors_on
+
+        if not self.motors_on:
+            return
+
         self.pwm_freq = 100
         self.servo_ids = [0, 1, 2, 3]
 
@@ -148,12 +153,18 @@ class PWMDriver:
         :return: None
         '''
 
+        if not self.motors_on:
+            return
+
         for id in self.servo_ids:
             length = (vals[id] * 1000 + 1000) // self.time_per_tick_us
             self.pwm.set_pwm(id, 0, length)
 
 
     def arm_escs(self):
+        if not self.motors_on:
+            return
+
         logging.info("Arming escs. ")
 
         for id in self.servo_ids:
@@ -171,10 +182,13 @@ class PWMDriver:
 
 
 class Controller:
-    def __init__(self):
-        logging.info("Initializing the Controller. ")
+    def __init__(self, motors_on=False):
+        self.motors_on = motors_on
+
+        logging.info("Initializing the Controller, motors_on: {}".format(self.motors_on))
+
         self.AHRS = AHRS()
-        self.PWMDriver = PWMDriver()
+        self.PWMDriver = PWMDriver(self.motors_on)
         self.ROSInterface = ROSInterface()
 
         self.p_roll = 0.1
@@ -241,5 +255,5 @@ class ROSInterface:
 
 
 if __name__ == "__main__":
-    controller = Controller()
-    controller.loop_control()
+    controller = Controller(motors_on=False)
+    #controller.loop_control()
