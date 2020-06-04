@@ -12,6 +12,13 @@ import tf2_ros
 import threading
 
 
+#   m1(cw)  m2(ccw)
+#      -     -
+#        - -
+#        - -
+#      -     -
+#  m3(ccw)  m4(cw)
+
 class AHRS:
 
     DEVICE_ADDR = 0x68  # MPU6050 device address
@@ -189,7 +196,9 @@ class Controller:
 
         self.AHRS = AHRS()
         self.PWMDriver = PWMDriver(self.motors_on)
-        self.ROSInterface = ROSInterface()
+        self.ROSInterface = ROSInterface(update_rate=50)
+
+        self.ros_rate = self.ROSInterface.ros_rate
 
         self.p_roll = 0.1
         self.p_pitch = 0.1
@@ -199,11 +208,15 @@ class Controller:
         self.d_pitch = 0.01
         self.d_yaw = 0.01
 
+        self.e_roll_prev = 0
+        self.e_pitch_prev = 0
+        self.e_yaw_prev = 0
+
 
     def loop_control(self):
 
         # Read target control inputs
-        t_roll, t_pitch, t_yaw = self.read_control_inputs()
+        t_roll, t_pitch, t_yaw, throttle = self.read_control_inputs()
 
         # Update sensor data
         roll, pitch, yaw, quat, timestamp = self.AHRS.update()
@@ -214,18 +227,28 @@ class Controller:
         e_yaw = t_yaw - yaw
 
         # Desired correction action
-        roll_act = e_roll * self.p_roll
-        roll_pitch = e_pitch * self.p_pitch
-        roll_yaw = e_yaw* self.p_yaw
+        roll_act = e_roll * self.p_roll + (e_roll - self.e_roll_prev) * self.d_roll
+        pitch_act = e_pitch * self.p_pitch + (e_pitch - self.e_pitch_prev) * self.d_pitch
+        yaw_act = e_yaw * self.p_yaw + (e_yaw - self.e_yaw_prev) * self.d_yaw
+
+        self.e_roll_prev = e_roll
+        self.e_pitch_prev = e_pitch
+        self.e_yaw_prev = e_yaw
 
         # Translate desired correction actions to servo commands
-        m_1 = 0
-        m_2 = 0
-        m_3 = 0
-        m_4 = 0
+        m_1 = throttle + roll_act - pitch_act - yaw_act
+        m_2 = throttle - roll_act - pitch_act + yaw_act
+        m_3 = throttle + roll_act + pitch_act + yaw_act
+        m_4 = throttle - roll_act + pitch_act - yaw_act
 
         # Write control to servos
         self.PWMDriver.write_servos([m_1, m_2, m_3, m_4])
+
+        # Publish telemetry values
+        self.ROSInterface.publish_telemetry()
+
+        # Sleep to maintain correct FPS
+        self.ros_rate.sleep()
 
 
     def read_control_inputs(self):
@@ -236,12 +259,15 @@ class Controller:
             t_roll = joy_message.axes[0]
             t_pitch = joy_message.axes[1]
             t_yaw = joy_message.axes[2]
-            return t_roll, t_pitch, t_yaw
+            throttle = joy_message.axes[3]
+            return t_roll, t_pitch, t_yaw, throttle
 
 
 
 class ROSInterface:
-    def __init__(self):
+    def __init__(self, update_rate=50):
+        self.ros_rate = rospy.Rate(update_rate)
+
         self.quad_pose_pub = rospy.Publisher('quad_pose', PoseStamped, queue_size=10)
         rospy.Subscriber("quad_teleop", Joy, self._ros_quad_teleop_callback, queue_size=10)
 
@@ -252,6 +278,10 @@ class ROSInterface:
     def _ros_quad_teleop_callback(self, data):
         with self.quad_teleop_lock:
             self.joy_input = data
+
+
+    def publish_telemetry(self):
+        pass
 
 
 if __name__ == "__main__":
