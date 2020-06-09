@@ -1,16 +1,18 @@
 import Adafruit_PCA9685
 import smbus
 import time
-import logging
+import sys
 import numpy as np
 import rospy
-import std_msgs, nav_msgs
+import std_msgs
+import nav_msgs
 from geometry_msgs.msg import Pose, PoseStamped, Twist
 from sensor_msgs.msg import Imu, Joy
 from nav_msgs.msg import Odometry, Path
-import tf2_ros
 import threading
-
+import copy
+import logging
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 #   m1(cw)  m2(ccw)
 #      -     -
@@ -26,6 +28,7 @@ class AHRS:
     SMPLRT_DIV = 0x19
     CONFIG = 0x1A
     GYRO_CONFIG = 0x1B
+    ACCEL_CONFIG = 0x1C
     INT_ENABLE = 0x38
     ACCEL_XOUT_H = 0x3B
     ACCEL_YOUT_H = 0x3D
@@ -33,12 +36,11 @@ class AHRS:
     GYRO_XOUT_H = 0x43
     GYRO_YOUT_H = 0x45
     GYRO_ZOUT_H = 0x47
-    GYRO_SENSITIVITY = 131.0
+    GYRO_SCALER = (2 * np.pi / 360. ) * (2000. / (2 ** 15)) # +- 2000 dps across a signed 16 bit value 
     ACC_SENSITIVITY = 16384.0
 
-
     def __init__(self):
-        logging.info("Initializing the MPU6050. ")
+        print("Initializing the MPU6050. ")
 
         self.bus = smbus.SMBus(1)
 
@@ -70,11 +72,12 @@ class AHRS:
         self.yaw = 0
         self.quat = [0, 0, 0, 1]
 
-        self.gyro_integration_coeff = 0.98
+        self.gyro_integration_coeff = 0.95
         self.acc_integration_coeff = 1.0 - self.gyro_integration_coeff
 
         self.timestamp = time.time()
-
+        
+        print("Finished initializing the MPU6050. ")
 
     def _read_raw_data(self, addr):
         # Accelero and Gyro value are 16-bit
@@ -89,34 +92,49 @@ class AHRS:
             value = value - 65536
         return value
 
-
     def update(self):
         # Read Accelerometer raw value
-        self.acc_x = self._read_raw_data(AHRS.ACCEL_XOUT_H) / AHRS.ACC_SENSITIVITY
-        self.acc_y = self._read_raw_data(AHRS.ACCEL_YOUT_H) / AHRS.ACC_SENSITIVITY
-        self.acc_z = self._read_raw_data(AHRS.ACCEL_ZOUT_H) / AHRS.ACC_SENSITIVITY
+        self.acc_x = self._read_raw_data(
+            AHRS.ACCEL_XOUT_H) / AHRS.ACC_SENSITIVITY
+        self.acc_y = self._read_raw_data(
+            AHRS.ACCEL_YOUT_H) / AHRS.ACC_SENSITIVITY
+        self.acc_z = self._read_raw_data(
+            AHRS.ACCEL_ZOUT_H) / AHRS.ACC_SENSITIVITY
 
         # Read Gyroscope raw value
-        self.gyro_x = self._read_raw_data(AHRS.GYRO_XOUT_H) / AHRS.GYRO_SENSITIVITY
-        self.gyro_y = self._read_raw_data(AHRS.GYRO_YOUT_H) / AHRS.GYRO_SENSITIVITY
-        self.gyro_z = self._read_raw_data(AHRS.GYRO_ZOUT_H) / AHRS.GYRO_SENSITIVITY
+        self.gyro_x = self._read_raw_data(
+            AHRS.GYRO_XOUT_H) * AHRS.GYRO_SCALER
+        self.gyro_y = self._read_raw_data(
+            AHRS.GYRO_YOUT_H) * AHRS.GYRO_SCALER
+        self.gyro_z = self._read_raw_data(
+            AHRS.GYRO_ZOUT_H) * AHRS.GYRO_SCALER
 
         # Calculate roll, pitch and yaw and corresponding quaternion
         t = time.time()
-        dt = self.timestamp - t
+        dt = t - self.timestamp
 
-        acc_x_dir = np.arctan2(self.acc_x, np.sqrt(self.acc_y ** 2 + self.acc_z))
-        acc_y_dir = np.arctan2(self.acc_y, np.sqrt(self.acc_x ** 2 + self.acc_z))
+        acc_x_dir = np.arctan2(self.acc_x, np.sqrt(
+            self.acc_y ** 2 + self.acc_z ** 2))
+        acc_y_dir = np.arctan2(self.acc_y, np.sqrt(
+            self.acc_x ** 2 + self.acc_z ** 2))
 
-        self.roll = self.gyro_integration_coeff * (self.roll + self.gyro_x * dt) + self.acc_integration_coeff * acc_x_dir
-        self.pitch = self.gyro_integration_coeff * (self.pitch + self.gyro_y * dt) + self.acc_integration_coeff * acc_y_dir
+        self.roll = self.gyro_integration_coeff * \
+            (self.roll + self.gyro_x * dt) + \
+            self.acc_integration_coeff * acc_y_dir
+        self.pitch = self.gyro_integration_coeff * \
+            (self.pitch - self.gyro_y * dt) + \
+            self.acc_integration_coeff * acc_x_dir
         self.yaw = self.yaw + self.gyro_z * dt
         self.quat = self.e2q(self.roll, self.pitch, self.yaw)
 
         self.timestamp = t
+        
+        #print(acc_y_dir, self.gyro_x)
+        #print(self.roll, self.pitch, self.yaw)
+        #print(self.acc_x, self.acc_y, self.acc_z)
+        #print(self.gyro_x, self.gyro_y, self.gyro_z)
 
         return self.roll, self.pitch, self.yaw, self.quat, self.timestamp
-
 
     def e2q(self, roll, pitch, yaw):
         qx = np.sin(roll / 2) * np.cos(pitch / 2) * np.cos(yaw / 2) - np.cos(roll / 2) * np.sin(pitch / 2) * np.sin(
@@ -131,7 +149,6 @@ class AHRS:
         return [qx, qy, qz, qw]
 
 
-
 class PWMDriver:
     def __init__(self, motors_on):
         self.motors_on = motors_on
@@ -142,7 +159,7 @@ class PWMDriver:
         self.pwm_freq = 100
         self.servo_ids = [0, 1, 2, 3]
 
-        logging.info("Initializing the PWMdriver. ")
+        print("Initializing the PWMdriver. ")
         self.pwm = Adafruit_PCA9685.PCA9685()
         self.pwm.set_pwm_freq(self.pwm_freq)
 
@@ -151,7 +168,8 @@ class PWMDriver:
         self.time_per_tick_us = period_length_us // (2 ** 10)
 
         self.arm_escs()
-
+        
+        print("Finished initializing the PWMdriver. ")
 
     def write_servos(self, vals):
         '''
@@ -167,12 +185,11 @@ class PWMDriver:
             length = (vals[id] * 1000 + 1000) // self.time_per_tick_us
             self.pwm.set_pwm(id, 0, length)
 
-
     def arm_escs(self):
         if not self.motors_on:
             return
 
-        logging.info("Arming escs. ")
+        print("Arming escs. ")
 
         for id in self.servo_ids:
             length = (2000) // self.time_per_tick_us
@@ -187,12 +204,63 @@ class PWMDriver:
         time.sleep(2)
 
 
+class ROSInterface:
+    def __init__(self, update_rate=50):
+        print("Initializing the ROS interface node")
+        
+        self.quad_pose_pub = rospy.Publisher(
+            'quad_pose', PoseStamped, queue_size=10)
+        rospy.Subscriber("quad_teleop", Joy,
+                         self._ros_quad_teleop_callback, queue_size=10)
+
+        self.quad_teleop_lock = threading.Lock()
+        self.joy_input = None
+        
+        rospy.init_node('ros_quad_interface_node', anonymous=True)
+        self.ros_rate = rospy.Rate(update_rate)
+                
+        print("Finished initializing the ROS interface node")
+
+
+    def _ros_quad_teleop_callback(self, data):
+        with self.quad_teleop_lock:
+            self.joy_input = data
+    
+    def read_control_inputs(self):
+        if self.joy_input is None:
+            return 0, 0, 0, 0
+        else:
+            with self.quad_teleop_lock:
+                joy_message = copy.deepcopy(self.joy_input)
+            t_roll = joy_message.axes[0]
+            t_pitch = joy_message.axes[1]
+            t_yaw = joy_message.axes[2]
+            throttle = joy_message.axes[3]
+            return t_roll, t_pitch, t_yaw, throttle        
+
+    def publish_telemetry(self, timestamp, quat):
+        msg = PoseStamped()
+        #msg.header.frame_id = 
+        #msg.header.stamp = timestamp
+        
+        msg.header.stamp = rospy.Time.now()
+        msg.header.frame_id = "map"
+        
+        #print(quat)
+
+        msg.pose.orientation.x = quat[0]
+        msg.pose.orientation.y = quat[1]
+        msg.pose.orientation.z = quat[2]
+        msg.pose.orientation.w = quat[3]
+        
+        self.quad_pose_pub.publish(msg)
+
 
 class Controller:
     def __init__(self, motors_on=False):
         self.motors_on = motors_on
 
-        logging.info("Initializing the Controller, motors_on: {}".format(self.motors_on))
+        print("Initializing the Controller, motors_on: {}".format(self.motors_on))
 
         self.AHRS = AHRS()
         self.PWMDriver = PWMDriver(self.motors_on)
@@ -211,82 +279,54 @@ class Controller:
         self.e_roll_prev = 0
         self.e_pitch_prev = 0
         self.e_yaw_prev = 0
-
+        
+        print("Finished initializing the Controller")
 
     def loop_control(self):
+        print("Starting the control loop")
+        while not rospy.is_shutdown():
+            # Read target control inputs
+            t_roll, t_pitch, t_yaw, throttle = self.ROSInterface.read_control_inputs()
 
-        # Read target control inputs
-        t_roll, t_pitch, t_yaw, throttle = self.read_control_inputs()
+            # Update sensor data
+            roll, pitch, yaw, quat, timestamp = self.AHRS.update()
 
-        # Update sensor data
-        roll, pitch, yaw, quat, timestamp = self.AHRS.update()
+            # Target errors
+            e_roll = t_roll - roll
+            e_pitch = t_pitch - pitch
+            e_yaw = t_yaw - yaw
 
-        # Target errors
-        e_roll = t_roll - roll
-        e_pitch = t_pitch - pitch
-        e_yaw = t_yaw - yaw
+            # Desired correction action
+            roll_act = e_roll * self.p_roll + \
+                (e_roll - self.e_roll_prev) * self.d_roll
+            pitch_act = e_pitch * self.p_pitch + \
+                (e_pitch - self.e_pitch_prev) * self.d_pitch
+            yaw_act = e_yaw * self.p_yaw + (e_yaw - self.e_yaw_prev) * self.d_yaw
 
-        # Desired correction action
-        roll_act = e_roll * self.p_roll + (e_roll - self.e_roll_prev) * self.d_roll
-        pitch_act = e_pitch * self.p_pitch + (e_pitch - self.e_pitch_prev) * self.d_pitch
-        yaw_act = e_yaw * self.p_yaw + (e_yaw - self.e_yaw_prev) * self.d_yaw
+            self.e_roll_prev = e_roll
+            self.e_pitch_prev = e_pitch
+            self.e_yaw_prev = e_yaw
 
-        self.e_roll_prev = e_roll
-        self.e_pitch_prev = e_pitch
-        self.e_yaw_prev = e_yaw
+            # Translate desired correction actions to servo commands
+            m_1 = throttle + roll_act - pitch_act - yaw_act
+            m_2 = throttle - roll_act - pitch_act + yaw_act
+            m_3 = throttle + roll_act + pitch_act + yaw_act
+            m_4 = throttle - roll_act + pitch_act - yaw_act
 
-        # Translate desired correction actions to servo commands
-        m_1 = throttle + roll_act - pitch_act - yaw_act
-        m_2 = throttle - roll_act - pitch_act + yaw_act
-        m_3 = throttle + roll_act + pitch_act + yaw_act
-        m_4 = throttle - roll_act + pitch_act - yaw_act
+            # TODO: Normalize control inputs, states and outputs to [-1,1] or other appropriate value
 
-        # TODO: Normalize control inputs, states and outputs to [-1,1] or other appropriate value
+            # Write control to servos
+            self.PWMDriver.write_servos([m_1, m_2, m_3, m_4])
 
-        # Write control to servos
-        self.PWMDriver.write_servos([m_1, m_2, m_3, m_4])
+            # Publish telemetry values
+            self.ROSInterface.publish_telemetry(timestamp, quat)
 
-        # Publish telemetry values
-        self.ROSInterface.publish_telemetry()
-
-        # Sleep to maintain correct FPS
-        self.ros_rate.sleep()
-
-
-    def read_control_inputs(self):
-        joy_message = self.ROSInterface.joy_input
-        if joy_message is None:
-            return 0,0,0
-        else:
-            t_roll = joy_message.axes[0]
-            t_pitch = joy_message.axes[1]
-            t_yaw = joy_message.axes[2]
-            throttle = joy_message.axes[3]
-            return t_roll, t_pitch, t_yaw, throttle
-
-
-
-class ROSInterface:
-    def __init__(self, update_rate=50):
-        self.ros_rate = rospy.Rate(update_rate)
-
-        self.quad_pose_pub = rospy.Publisher('quad_pose', PoseStamped, queue_size=10)
-        rospy.Subscriber("quad_teleop", Joy, self._ros_quad_teleop_callback, queue_size=10)
-
-        self.quad_teleop_lock = threading.Lock()
-        self.joy_input = None
-
-
-    def _ros_quad_teleop_callback(self, data):
-        with self.quad_teleop_lock:
-            self.joy_input = data
-
-
-    def publish_telemetry(self):
-        pass
-
+            # Sleep to maintain correct FPS
+            self.ros_rate.sleep()
+            
 
 
 if __name__ == "__main__":
     controller = Controller(motors_on=False)
-    #controller.loop_control()
+    controller.loop_control()
+
