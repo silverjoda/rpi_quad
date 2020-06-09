@@ -25,6 +25,7 @@ class JoyRosQuadController():
         time.sleep(0.5)
 
         while(True):
+            pygame.event.pump()
             print([joystick.get_axis(i) for i in range(joystick.get_numaxes())])
             print([joystick.get_button(i) for i in range(joystick.get_numbuttons())])
             print([joystick.get_hat(i) for i in range(joystick.get_numhats())])
