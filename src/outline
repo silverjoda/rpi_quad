@@ -1,6 +1,0 @@
-# Imu data reading
-# Complementary filter for IMU
-# Writing motor control outputs to pwm driver
-# Control loop
-# ROS reading inputs from control topic
-# ROS topic publishing for logging and monitoring

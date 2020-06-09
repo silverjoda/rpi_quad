@@ -14,15 +14,19 @@ import copy
 import logging
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
-#   m1(cw)  m2(ccw)
+#  m1(cw)   m2(ccw)
 #      -     -
 #        - -
 #        - -
 #      -     -
 #  m3(ccw)  m4(cw)
+#
+# Target inputs are in radians
+# Motor inputs to PWM driver are in [0,1], later scaled to pulsewidth 1ms-2ms
+# Gyro scale is maximal (+-2000 deg/s)
+# Acc scale is ??
 
 class AHRS:
-
     DEVICE_ADDR = 0x68  # MPU6050 device address
     PWR_MGMT_1 = 0x6B
     SMPLRT_DIV = 0x19
@@ -216,7 +220,7 @@ class ROSInterface:
         self.quad_teleop_lock = threading.Lock()
         self.joy_input = None
         
-        rospy.init_node('ros_quad_interface_node', anonymous=True)
+        rospy.init_node('ros_quad_interface_node')
         self.ros_rate = rospy.Rate(update_rate)
                 
         print("Finished initializing the ROS interface node")
@@ -240,13 +244,8 @@ class ROSInterface:
 
     def publish_telemetry(self, timestamp, quat):
         msg = PoseStamped()
-        #msg.header.frame_id = 
-        #msg.header.stamp = timestamp
-        
-        msg.header.stamp = rospy.Time.now()
+        msg.header.stamp = timestamp
         msg.header.frame_id = "map"
-        
-        #print(quat)
 
         msg.pose.orientation.x = quat[0]
         msg.pose.orientation.y = quat[1]
@@ -283,6 +282,11 @@ class Controller:
         print("Finished initializing the Controller")
 
     def loop_control(self):
+        '''
+        Target inputs are in radians, throttle is in [0,1]
+        Roll, pitch and yaw are in radians. 
+        Motor outputs are sent to the motor driver as [0,1]
+        '''
         print("Starting the control loop")
         while not rospy.is_shutdown():
             # Read target control inputs
@@ -297,24 +301,31 @@ class Controller:
             e_yaw = t_yaw - yaw
 
             # Desired correction action
-            roll_act = e_roll * self.p_roll + \
-                (e_roll - self.e_roll_prev) * self.d_roll
-            pitch_act = e_pitch * self.p_pitch + \
-                (e_pitch - self.e_pitch_prev) * self.d_pitch
+            roll_act = e_roll * self.p_roll + (e_roll - self.e_roll_prev) * self.d_roll
+            pitch_act = e_pitch * self.p_pitch + (e_pitch - self.e_pitch_prev) * self.d_pitch
             yaw_act = e_yaw * self.p_yaw + (e_yaw - self.e_yaw_prev) * self.d_yaw
 
             self.e_roll_prev = e_roll
             self.e_pitch_prev = e_pitch
             self.e_yaw_prev = e_yaw
+            
+            m_1_act_total = + roll_act / (2 * np.pi) + pitch_act / (2 * np.pi) - yaw_act / (2 * np.pi)
+            m_2_act_total = - roll_act / (2 * np.pi) + pitch_act / (2 * np.pi) + yaw_act / (2 * np.pi)
+            m_3_act_total = + roll_act / (2 * np.pi) - pitch_act / (2 * np.pi) + yaw_act / (2 * np.pi)
+            m_4_act_total = - roll_act / (2 * np.pi) - pitch_act / (2 * np.pi) - yaw_act / (2 * np.pi)
+            
+            max_act = np.max([m_1_act_total, m_1_act_total, m_1_act_total, m_2_act_total])
+            clipped_throttle = np.minimum(throttle, 1 - max_act)
 
             # Translate desired correction actions to servo commands
-            m_1 = throttle + roll_act - pitch_act - yaw_act
-            m_2 = throttle - roll_act - pitch_act + yaw_act
-            m_3 = throttle + roll_act + pitch_act + yaw_act
-            m_4 = throttle - roll_act + pitch_act - yaw_act
-
-            # TODO: Normalize control inputs, states and outputs to [-1,1] or other appropriate value
-
+            m_1 = clipped_throttle + m_1_act_total 
+            m_2 = clipped_throttle + m_2_act_total
+            m_3 = clipped_throttle + m_3_act_total
+            m_4 = clipped_throttle + m_4_act_total 
+            
+            if np.max([m_1, m_2, m_3, m_4) > 1:
+                print("Warning: motor commands exceed 1.0. This signifies an error in the system")
+            
             # Write control to servos
             self.PWMDriver.write_servos([m_1, m_2, m_3, m_4])
 
@@ -325,8 +336,9 @@ class Controller:
             self.ros_rate.sleep()
             
 
-
 if __name__ == "__main__":
     controller = Controller(motors_on=False)
     controller.loop_control()
+    
+    # TODO: Test the motors and input commands
 
