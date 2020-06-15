@@ -4,6 +4,7 @@
 # License: Public Domain
 from __future__ import division
 import time
+import numpy as np
 
 # Import the PCA9685 module.
 import Adafruit_PCA9685
@@ -24,22 +25,22 @@ pwm_freq = 100
 # Set frequency to 60hz, good for servos.
 pwm.set_pwm_freq(pwm_freq)
 
-def set_servo_pulse(channel, pulse):
-    pulse_length = 1000000    # 1,000,000 us per second
-    pulse_length //= pwm_freq      # 60 Hz
-    pulse_length //= 4096     # 12 bits of resolution
-    pulse //= pulse_length
-    pwm.set_pwm(channel, motor_id, pulse)
-
-set_servo_pulse(motor_id, 1900)
-time.sleep(1)
-set_servo_pulse(motor_id, 1100)
-time.sleep(3)
+def set_servo_cmd(channel, val):
+    '''
+    Command from [0,1]
+    '''
+    val_clip = np.clip(val, 0, 1)
+    pulse_length = ((val_clip + 1) * 1000) / ((1000000. / pwm_freq) / 4096.)
+    pwm.set_pwm(channel, 0, int(pulse_length))
+    
+    
+set_servo_cmd(2, 0)
+time.sleep(2)
 
 print('Moving motor on channel 0, press Ctrl-C to quit...')
 while True:
-    # Move servo on channel O between extremes.
-    set_servo_pulse(motor_id, 1100)
-    time.sleep(2)
-    set_servo_pulse(motor_id, 1300)
-    time.sleep(2)
+    for i in range(10):
+        set_servo_cmd(2, i / 10.)
+        time.sleep(0.3)
+    set_servo_cmd(2, 0)
+    time.sleep(3)

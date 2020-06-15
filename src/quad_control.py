@@ -160,16 +160,12 @@ class PWMDriver:
         if not self.motors_on:
             return
 
-        self.pwm_freq = 100
+        self.pwm_freq = 50
         self.servo_ids = [0, 1, 2, 3]
 
         print("Initializing the PWMdriver. ")
         self.pwm = Adafruit_PCA9685.PCA9685()
         self.pwm.set_pwm_freq(self.pwm_freq)
-
-        second_us = 1000000
-        period_length_us = second_us // self.pwm_freq
-        self.time_per_tick_us = period_length_us // (2 ** 10)
 
         self.arm_escs()
         
@@ -186,24 +182,14 @@ class PWMDriver:
             return
 
         for id in self.servo_ids:
-            length = (vals[id] * 1000 + 1000) // self.time_per_tick_us
-            self.pwm.set_pwm(id, 0, length)
+            pulse_length = ((vals[id] + 1) * 1000) / ((1000000. / self.pwm_freq) / 4096.)
+            self.pwm.set_pwm(id, 0, pulse_length)
 
     def arm_escs(self):
-        if not self.motors_on:
-            return
-
-        print("Arming escs. ")
+        print("Setting escs to lowest value. ")
 
         for id in self.servo_ids:
-            length = (2000) // self.time_per_tick_us
-            self.pwm.set_pwm(id, 0, length)
-
-        time.sleep(2)
-
-        for id in self.servo_ids:
-            length = (1000) // self.time_per_tick_us
-            self.pwm.set_pwm(id, 0, length)
+            write_servos([0, 0, 0, 0])
 
         time.sleep(2)
 
