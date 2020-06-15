@@ -8,14 +8,30 @@ import threading
 import copy
 import logging
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+import pygame
 
 class JoyRosQuadController():
     def __init__(self, update_rate=50):
         print("Initializing quadcopter ros joystick controller")
         
-        self.joystick_control_pub = rospy.Publisher, 'quad_teleop', Joy, queue_size=10)
+        self.joystick_control_pub = rospy.Publisher('quad_teleop', Joy, queue_size=10)
         rospy.init_node('ros_quad_joystick_controller_node')
         self.ros_rate = rospy.Rate(update_rate)
+
+        pygame.init()
+        joystick = pygame.joystick.Joystick(0)
+        joystick.init()
+        print(joystick.get_name())
+        time.sleep(0.5)
+
+        while(True):
+            pygame.event.pump()
+            print([joystick.get_axis(i) for i in range(joystick.get_numaxes())])
+            print([joystick.get_button(i) for i in range(joystick.get_numbuttons())])
+            print([joystick.get_hat(i) for i in range(joystick.get_numhats())])
+            time.sleep(0.01)
+
+        exit()
                 
         print("Finished initializing the quadcopter ros joystick controller")
     
@@ -32,14 +48,20 @@ class JoyRosQuadController():
             return t_roll, t_pitch, t_yaw, throttle        
 
     def loop(self, timestamp, quat):
+    
+
+                
+    
+        return
+        
 
         # Read control from usb joystick
-    
+     
     
         # Make ros message and publish it
         msg = Joy()
         msg.header.stamp = rospy.Time.now()
-        msg.axes[0] = ...
+        msg.axes[0] = 0
         
         self.joystick_control_pub.publish(msg)
 
