@@ -189,7 +189,7 @@ class PWMDriver:
         print("Setting escs to lowest value. ")
 
         for id in self.servo_ids:
-            write_servos([0, 0, 0, 0])
+            self.write_servos([0, 0, 0, 0])
 
         time.sleep(2)
 
@@ -205,12 +205,13 @@ class ROSInterface:
 
         self.quad_teleop_lock = threading.Lock()
         self.joy_input = None
-        
+        self.throttle = 0
+        self.throttle_delta = 0.03
+
         rospy.init_node('ros_quad_interface_node')
         self.ros_rate = rospy.Rate(update_rate)
                 
         print("Finished initializing the ROS interface node")
-
 
     def _ros_quad_teleop_callback(self, data):
         with self.quad_teleop_lock:
@@ -222,11 +223,11 @@ class ROSInterface:
         else:
             with self.quad_teleop_lock:
                 joy_message = copy.deepcopy(self.joy_input)
-            t_roll = joy_message.axes[0]
-            t_pitch = joy_message.axes[1]
-            t_yaw = joy_message.axes[2]
-            throttle = joy_message.axes[3]
-            return t_roll, t_pitch, t_yaw, throttle        
+
+            yaw, _, th_minus, roll, pitch, th_plus = joy_message.axes
+            self.throttle = self.throttle + (((th_plus + 1) / 2.) - ((th_minus + 1) / 2.)) * self.throttle_delta
+
+            return roll, pitch, yaw, self.throttle
 
     def publish_telemetry(self, timestamp, quat):
         msg = PoseStamped()
@@ -309,7 +310,7 @@ class Controller:
             m_3 = clipped_throttle + m_3_act_total
             m_4 = clipped_throttle + m_4_act_total 
             
-            if np.max([m_1, m_2, m_3, m_4) > 1:
+            if np.max([m_1, m_2, m_3, m_4]) > 1:
                 print("Warning: motor commands exceed 1.0. This signifies an error in the system")
             
             # Write control to servos

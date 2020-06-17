@@ -10,8 +10,10 @@ import logging
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 import pygame
 
+# On xbox gamepad tits are -1 [left, up] and +1 [right, down], 0 in neutral. long buttons are default -1 and +1 fully pressed
+
 class JoyRosQuadController():
-    def __init__(self, update_rate=50):
+    def __init__(self, update_rate=30):
         print("Initializing quadcopter ros joystick controller")
         
         self.joystick_control_pub = rospy.Publisher('quad_teleop', Joy, queue_size=10)
@@ -19,51 +21,28 @@ class JoyRosQuadController():
         self.ros_rate = rospy.Rate(update_rate)
 
         pygame.init()
-        joystick = pygame.joystick.Joystick(0)
-        joystick.init()
-        print(joystick.get_name())
-        time.sleep(0.5)
+        self.joystick = pygame.joystick.Joystick(0)
+        self.joystick.init()
+        print("Initialized gamepad: {}".format(self.joystick.get_name()))
+        print("Finished initializing the quadcopter ros joystick controller.")
 
-        while(True):
+
+    def loop(self):
+        print("Starting joystick loop.")
+        while True:
             pygame.event.pump()
-            print([joystick.get_axis(i) for i in range(joystick.get_numaxes())])
-            print([joystick.get_button(i) for i in range(joystick.get_numbuttons())])
-            print([joystick.get_hat(i) for i in range(joystick.get_numhats())])
-            time.sleep(0.01)
+            data = [self.joystick.get_axis(i) for i in range(self.joystick.get_numaxes())]
 
-        exit()
-                
-        print("Finished initializing the quadcopter ros joystick controller")
-    
-    def read_control_inputs(self):
-        if self.joy_input is None:
-            return 0, 0, 0, 0
-        else:
-            with self.quad_teleop_lock:
-                joy_message = copy.deepcopy(self.joy_input)
-            t_roll = joy_message.axes[0]
-            t_pitch = joy_message.axes[1]
-            t_yaw = joy_message.axes[2]
-            throttle = joy_message.axes[3]
-            return t_roll, t_pitch, t_yaw, throttle        
+            # Make ros message and publish it
+            msg = Joy()
+            msg.header.stamp = rospy.Time.now()
+            msg.axes = data
 
-    def loop(self, timestamp, quat):
-    
+            self.joystick_control_pub.publish(msg)
 
-                
-    
-        return
-        
+            pygame.event.clear()
+            self.ros_rate.sleep()
 
-        # Read control from usb joystick
-     
-    
-        # Make ros message and publish it
-        msg = Joy()
-        msg.header.stamp = rospy.Time.now()
-        msg.axes[0] = 0
-        
-        self.joystick_control_pub.publish(msg)
 
 if __name__ == "__main__":
     joy_controler = JoyRosQuadController()
