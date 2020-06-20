@@ -78,6 +78,7 @@ class AHRS:
 
         self.gyro_integration_coeff = 0.95
         self.acc_integration_coeff = 1.0 - self.gyro_integration_coeff
+        self.gyro_z_deadzone = 0.03
 
         self.timestamp = time.time()
         
@@ -128,7 +129,9 @@ class AHRS:
         self.pitch = self.gyro_integration_coeff * \
             (self.pitch - self.gyro_y * dt) + \
             self.acc_integration_coeff * acc_x_dir
-        self.yaw = self.yaw + self.gyro_z * dt
+
+        if abs(self.gyro_z) > self.gyro_z_deadzone:
+            self.yaw = self.yaw + self.gyro_z * dt
         self.quat = self.e2q(self.roll, self.pitch, self.yaw)
 
         self.timestamp = t
@@ -136,7 +139,8 @@ class AHRS:
         #print(acc_y_dir, self.gyro_x)
         #print(self.roll, self.pitch, self.yaw)
         #print(self.acc_x, self.acc_y, self.acc_z)
-        #print(self.gyro_x, self.gyro_y, self.gyro_z)
+
+        print(self.gyro_x, self.gyro_y, self.gyro_z)
 
         return self.roll, self.pitch, self.yaw, self.quat, self.timestamp
 
@@ -183,7 +187,7 @@ class PWMDriver:
 
         for id in self.servo_ids:
             pulse_length = ((vals[id] + 1) * 1000) / ((1000000. / self.pwm_freq) / 4096.)
-            self.pwm.set_pwm(id, 0, pulse_length)
+            self.pwm.set_pwm(id, 0, int(pulse_length))
 
     def arm_escs(self):
         print("Setting escs to lowest value. ")
@@ -206,7 +210,9 @@ class ROSInterface:
         self.quad_teleop_lock = threading.Lock()
         self.joy_input = None
         self.throttle = 0
-        self.throttle_delta = 0.03
+        self.throttle_delta = 0.01
+        self.target_yaw = 0
+        self.target_yaw_delta = 0.03
 
         rospy.init_node('ros_quad_interface_node')
         self.ros_rate = rospy.Rate(update_rate)
@@ -224,10 +230,13 @@ class ROSInterface:
             with self.quad_teleop_lock:
                 joy_message = copy.deepcopy(self.joy_input)
 
-            yaw, _, th_minus, roll, pitch, th_plus = joy_message.axes
-            self.throttle = self.throttle + (((th_plus + 1) / 2.) - ((th_minus + 1) / 2.)) * self.throttle_delta
+            yaw_inc, _, th_minus, roll, pitch, th_plus = joy_message.axes
+            self.throttle = np.clip(self.throttle + (((th_plus + 1) / 2.) - ((th_minus + 1) / 2.)) * self.throttle_delta, 0, 1)
+            
+            if abs(yaw_inc) > 0.03:
+                self.target_yaw -= yaw_inc * self.target_yaw_delta # Minus here because left stick is -1 and that has to correspond to positive yaw
 
-            return roll, pitch, yaw, self.throttle
+            return roll, pitch, self.target_yaw, self.throttle
 
     def publish_telemetry(self, timestamp, quat):
         msg = PoseStamped()
@@ -254,13 +263,13 @@ class Controller:
 
         self.ros_rate = self.ROSInterface.ros_rate
 
-        self.p_roll = 0.1
-        self.p_pitch = 0.1
-        self.p_yaw = 0.1
+        self.p_roll = 0.7
+        self.p_pitch = 0.7
+        self.p_yaw = 0.3
 
-        self.d_roll = 0.01
-        self.d_pitch = 0.01
-        self.d_yaw = 0.01
+        self.d_roll = 0.3
+        self.d_pitch = 0.3
+        self.d_yaw = 0.1
 
         self.e_roll_prev = 0
         self.e_pitch_prev = 0
@@ -295,11 +304,11 @@ class Controller:
             self.e_roll_prev = e_roll
             self.e_pitch_prev = e_pitch
             self.e_yaw_prev = e_yaw
-            
-            m_1_act_total = + roll_act / (2 * np.pi) + pitch_act / (2 * np.pi) - yaw_act / (2 * np.pi)
-            m_2_act_total = - roll_act / (2 * np.pi) + pitch_act / (2 * np.pi) + yaw_act / (2 * np.pi)
-            m_3_act_total = + roll_act / (2 * np.pi) - pitch_act / (2 * np.pi) + yaw_act / (2 * np.pi)
-            m_4_act_total = - roll_act / (2 * np.pi) - pitch_act / (2 * np.pi) - yaw_act / (2 * np.pi)
+
+            m_1_act_total = + roll_act / (2 * np.pi) + pitch_act / (2 * np.pi) + yaw_act / (2 * np.pi)
+            m_2_act_total = - roll_act / (2 * np.pi) + pitch_act / (2 * np.pi) - yaw_act / (2 * np.pi)
+            m_3_act_total = + roll_act / (2 * np.pi) - pitch_act / (2 * np.pi) - yaw_act / (2 * np.pi)
+            m_4_act_total = - roll_act / (2 * np.pi) - pitch_act / (2 * np.pi) + yaw_act / (2 * np.pi)
             
             max_act = np.max([m_1_act_total, m_1_act_total, m_1_act_total, m_2_act_total])
             clipped_throttle = np.minimum(throttle, 1 - max_act)
@@ -309,7 +318,7 @@ class Controller:
             m_2 = clipped_throttle + m_2_act_total
             m_3 = clipped_throttle + m_3_act_total
             m_4 = clipped_throttle + m_4_act_total 
-            
+
             if np.max([m_1, m_2, m_3, m_4]) > 1:
                 print("Warning: motor commands exceed 1.0. This signifies an error in the system")
             

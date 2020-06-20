@@ -20,7 +20,7 @@ pwm = Adafruit_PCA9685.PCA9685()
 #pwm = Adafruit_PCA9685.PCA9685(address=0x41, busnum=2)
 
 motor_id = 2
-pwm_freq = 100
+pwm_freq = 50 
 
 # Set frequency to 60hz, good for servos.
 pwm.set_pwm_freq(pwm_freq)
@@ -31,16 +31,16 @@ def set_servo_cmd(channel, val):
     '''
     val_clip = np.clip(val, 0, 1)
     pulse_length = ((val_clip + 1) * 1000) / ((1000000. / pwm_freq) / 4096.)
+    print(int(pulse_length))
     pwm.set_pwm(channel, 0, int(pulse_length))
-    
     
 set_servo_cmd(2, 0)
 time.sleep(2)
 
 print('Moving motor on channel 0, press Ctrl-C to quit...')
 while True:
-    for i in range(10):
-        set_servo_cmd(2, i / 10.)
-        time.sleep(0.3)
+    for i in range(100):
+        set_servo_cmd(2, i / 100.)
+        time.sleep(0.2)
     set_servo_cmd(2, 0)
     time.sleep(3)
