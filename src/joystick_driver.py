@@ -29,7 +29,7 @@ class JoyRosQuadController():
 
     def loop(self):
         print("Starting joystick loop.")
-        while True:
+        while not rospy.is_shutdown():
             pygame.event.pump()
             data = [self.joystick.get_axis(i) for i in range(self.joystick.get_numaxes())]
 
